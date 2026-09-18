@@ -1550,7 +1550,7 @@ error:
         if (buf) {
             len = snprintf(buf, len + 1, format, it - data, row, column, error_msg);
 
-            if (len > 0) {
+            if (len > 0 && error_callback) {
                 error_callback(buf, len);
             }
 

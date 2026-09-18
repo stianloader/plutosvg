@@ -1258,6 +1258,11 @@ static bool parse_attributes(const char** begin, const char* end, element_t* ele
 
 plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int length, float width, float height, plutovg_destroy_func_t destroy_func, void* closure)
 {
+    return stianloader_dbg_plutosvg_document_load_from_data(data, length, width, height, destroy_func, closure, NULL);
+}
+
+plutosvg_document_t* stianloader_dbg_plutosvg_document_load_from_data(const char* data, int length, float width, float height, plutovg_destroy_func_t destroy_func, void* closure, stianloader_dbg_plutosvg_error_callback_func_t error_callback)
+{
     if(length == -1)
         length = strlen(data);
     if(length >= 3) {
@@ -1274,6 +1279,7 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
 
     const char* it = data;
     const char* end = it + length;
+    const char* error_msg = NULL;
 
     plutosvg_document_t* document = plutosvg_document_create(width, height, destroy_func, closure);
     element_t* current = NULL;
@@ -1291,18 +1297,38 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
             }
         }
 
-        if(it >= end || *it != '<')
+        if(it >= end) {
+            error_msg = "Buffer overflow: There is no more data to read.";
             goto error;
+        } else if (*it != '<') {
+            if (current == NULL) {
+                if (*it == '\0') {
+                    error_msg = "Rogue character; Expected '<' whilst no current element, got '\\0' - for reference, data should not be null-terminated (and if it is, len must not include the null terminator).";
+                } else {
+                    error_msg = "Rogue character; Expected '<' whilst no current element";
+                }
+            } else {
+                error_msg = "Rogue character; Expected '<' with current element";
+            }
+            goto error;
+        }
+
         ++it;
         if(it < end && *it == '?') {
             ++it;
-            if(!skip_string(&it, end, "xml"))
+            if(!skip_string(&it, end, "xml")) {
+                error_msg = "Unsupported tag; Expected string 'xml'";
                 goto error;
+            }
             skip_ws(&it, end);
-            if(!parse_attributes(&it, end, NULL, NULL))
+            if(!parse_attributes(&it, end, NULL, NULL)) {
+                error_msg = "Cannot parse attributes in the '<?xml' component";
                 goto error;
-            if(!skip_string(&it, end, "?>"))
+            }
+            if(!skip_string(&it, end, "?>")) {
+                error_msg = "Expected closing tag '?>' for opened '<?xml'";
                 goto error;
+            }
             skip_ws(&it, end);
             continue;
         }
@@ -1311,8 +1337,10 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
             ++it;
             if(skip_string(&it, end, "--")) {
                 const char* begin = string_find(it, end, "-->");
-                if(begin == NULL)
+                if(begin == NULL) {
+                    error_msg = "Unclosed comment started with '<!--' (cannot find '-->')";
                     goto error;
+                }
                 it = begin + 3;
                 skip_ws(&it, end);
                 continue;
@@ -1320,8 +1348,10 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
 
             if(skip_string(&it, end, "[CDATA[")) {
                 const char* begin = string_find(it, end, "]]>");
-                if(begin == NULL)
+                if(begin == NULL) {
+                    error_msg = "Unclosed CDATA section (cannot find ']]>')";
                     goto error;
+                }
                 it = begin + 3;
                 skip_ws(&it, end);
                 continue;
@@ -1342,8 +1372,10 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
                     }
                 }
 
-                if(!skip_delim(&it, end, '>'))
+                if(!skip_delim(&it, end, '>')) {
+                    error_msg = "Unexpected character in DOCTYPE tag - expected '>'";
                     goto error;
+                }
                 skip_ws(&it, end);
                 continue;
             }
@@ -1352,26 +1384,34 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
         }
 
         if(it < end && *it == '/') {
-            if(current == NULL && ignoring == 0)
+            if(current == NULL && ignoring == 0) {
+                error_msg = "Unexpected closing tag when no tags are open";
                 goto error;
+            }
             ++it;
-            if(it >= end || !IS_STARTNAMECHAR(*it))
+            if(it >= end || !IS_STARTNAMECHAR(*it)) {
+                error_msg = "L1379 raised whilst closing tag";
                 goto error;
+            }
             const char* begin = it++;
             while(it < end && IS_NAMECHAR(*it))
                 ++it;
             if(ignoring == 0) {
                 int id = elementid(begin, it - begin);
-                if(id != current->id)
+                if(id != current->id) {
+                    error_msg = "L1388 raised whilst closing tag";
                     goto error;
+                }
                 current = current->parent;
             } else {
                 --ignoring;
             }
 
             skip_ws(&it, end);
-            if(it >= end || *it != '>')
+            if(it >= end || *it != '>') {
+                error_msg = "L1398 raised whilst closing tag";
                 goto error;
+            }
             ++it;
             continue;
         }
@@ -1476,6 +1516,48 @@ plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int leng
     }
 
 error:
+    const char* format = (error_msg) ? "Parsing failure near character at index '%d' (row %d, column %d): %s" : "Parsing failure near character at index '%d' (row %d, column %d) (Unknown cause)";
+    const char* cursor = data;
+    int column = 1;
+    int row = 1;
+
+    while (cursor < it) {
+        if (*cursor == '\r') {
+            cursor++;
+
+            if (*cursor == '\n') {
+                // Treat CRLF as a single line break
+                cursor++;
+                column = 1;
+                row++;
+            } else {
+                column = 1;
+            }
+        } else if (*cursor == '\n') {
+            cursor++;
+            column = 1;
+            row++;
+        } else {
+            cursor++;
+        }
+    }
+
+    int len = snprintf(NULL, 0, format, it - data, row, column, error_msg);
+
+    if (len >= 0) {
+        char* buf = malloc(len + 1);
+
+        if (buf) {
+            len = snprintf(buf, len + 1, format, it - data, row, column, error_msg);
+
+            if (len > 0) {
+                error_callback(buf, len);
+            }
+
+            free(buf);
+        }
+    }
+
     plutosvg_document_destroy(document);
     return NULL;
 }

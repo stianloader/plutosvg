@@ -87,6 +87,26 @@ typedef struct plutosvg_document plutosvg_document_t;
 typedef bool (*plutosvg_palette_func_t)(void* closure, const char* name, int length, plutovg_color_t* color);
 
 /**
+ * @brief Callback type for error message handling whilst operating on SVG documents.
+ *
+ * Callback type used when an error occured during document loading/handling
+ * to provide further information about the error in a user-friendly manner.
+ * The message is not meant to be handled by computers and the exact contents
+ * are left unspecified.
+ *
+ * @note An error (as usually indicated by a NULL return value) does not
+ * necessitate a call to this callback function, especially when the error
+ * cause is not known. Though usually that is the case if other metadata
+ * such as error location can be provided regardless of circumstance.
+ *
+ * @note The buffer pointed by `message` is invalid once the callback returns.
+ * 
+ * @param message The error message. Deallocated after invoking this function and may need to be copied over manually.
+ * @param length Length of the message buffer.
+ */
+typedef void (*stianloader_dbg_plutosvg_error_callback_func_t)(const char* message, int length);
+
+/**
  * @brief Loads an SVG document from a data buffer.
  *
  * @note The buffer pointed to by `data` must remain valid until the returned `plutosvg_document_t` object is destroyed.
@@ -101,6 +121,23 @@ typedef bool (*plutosvg_palette_func_t)(void* closure, const char* name, int len
  */
 PLUTOSVG_API plutosvg_document_t* plutosvg_document_load_from_data(const char* data, int length, float width, float height,
     plutovg_destroy_func_t destroy_func, void* closure);
+
+/**
+ * @brief Loads an SVG document from a data buffer.
+ *
+ * @note The buffer pointed to by `data` must remain valid until the returned `plutosvg_document_t` object is destroyed.
+ *
+ * @param data Pointer to the SVG data buffer.
+ * @param length Length of the data buffer.
+ * @param width Container width used to resolve the intrinsic width, or `-1` if unspecified.
+ * @param height Container height used to resolve the intrinsic height, or `-1` if unspecified.
+ * @param destroy_func Custom function called when the document is destroyed.
+ * @param closure User-defined data passed to the `destroy_func` callback.
+ * @param error_callback The callback function to use for error handling, or `NULL` if unused.
+ * @return Pointer to the loaded `plutosvg_document_t` object, or `NULL` if loading fails.
+ */
+PLUTOSVG_API plutosvg_document_t* stianloader_dbg_plutosvg_document_load_from_data(const char* data, int length, float width, float height,
+    plutovg_destroy_func_t destroy_func, void* closure, stianloader_dbg_plutosvg_error_callback_func_t error_callback);
 
 /**
  * @brief Loads an SVG document from a file.

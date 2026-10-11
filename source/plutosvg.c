@@ -86,7 +86,9 @@ enum {
     ATTR_X2,
     ATTR_Y,
     ATTR_Y1,
-    ATTR_Y2
+    ATTR_Y2,
+    STIANLOADER_ATTR_TRANSFORM_ORIGIN,
+    STIANLOADER_ATTR_TRANSFORM_BOX
 };
 
 #define MAX_NAME 19
@@ -220,6 +222,8 @@ static int cssattributeid(const char* data, size_t length)
         {"stroke-miterlimit", ATTR_STROKE_MITERLIMIT},
         {"stroke-opacity", ATTR_STROKE_OPACITY},
         {"stroke-width", ATTR_STROKE_WIDTH},
+        {"transform-box", STIANLOADER_ATTR_TRANSFORM_BOX},
+        {"transform-origin", STIANLOADER_ATTR_TRANSFORM_ORIGIN},
         {"visibility", ATTR_VISIBILITY}
     };
 
@@ -985,11 +989,27 @@ static bool parse_points(const element_t* element, int id, plutovg_path_t* path)
     return true;
 }
 
-static bool parse_path(const element_t* element, int id, plutovg_path_t* path)
+static bool stianloader_dbg_parse_path(const element_t* element, int id, plutovg_path_t* path, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     const string_t* value = find_attribute(element, id, false);
     if(value == NULL)
         return false;
+
+    if (log_callback) {
+        const char* format = "Parsing attribute with value data: %.*s";
+        int len = snprintf(NULL, 0, format, value->length, value->data);
+
+        if (len > 0) {
+            char* buf = malloc(len + 1);
+
+            if (buf) {
+                len = snprintf(buf, len + 1, format, value->length, value->data);
+                log_callback(buf, len);
+                free(buf);
+            }
+        }
+    }
+
     return plutovg_path_parse(path, value->data, value->length);
 }
 
@@ -1632,7 +1652,7 @@ typedef struct render_state {
 #define IS_INVALID_RECT(rect) ((rect).w < 0 || (rect).h < 0)
 #define IS_EMPTY_RECT(rect) ((rect).w <= 0 || (rect).h <= 0)
 
-static void render_state_begin(const element_t* element, render_state_t* state, render_state_t* parent)
+static bool stianloader_dbg_render_state_begin(const element_t* element, render_state_t* state, render_state_t* parent, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     state->parent = parent;
     state->element = element;
@@ -1644,13 +1664,43 @@ static void render_state_begin(const element_t* element, render_state_t* state, 
     state->view_width = parent->view_width;
     state->view_height = parent->view_height;
 
-    if(element->parent && parse_transform(element, ATTR_TRANSFORM, &state->matrix))
+    if(element->parent && parse_transform(element, ATTR_TRANSFORM, &state->matrix)) {
         plutovg_matrix_multiply(&state->matrix, &state->matrix, &parent->matrix);
+    }
+
     if(state->mode == render_mode_painting) {
         if(parse_number(element, ATTR_OPACITY, &state->opacity, true, false)) {
             state->opacity *= parent->opacity;
         }
     }
+
+    /*const string_t* transformBox = find_attribute(element, STIANLOADER_ATTR_TRANSFORM_BOX, false);
+
+    if (transformBox && strcmp(transformBox, "view-box")) { // <<<< COMPLETELY INCORRECT (string_t != char*)
+        if (log_callback) {
+            const char* format = "Unsupported transform-box attribute: %s";
+            int len = snprintf(NULL, 0, format, transformBox); // <<<< COMPLETELY INCORRECT (string_t != char*)
+
+            if (len > 0) {
+                char* buf = malloc(len + 1);
+
+                if (buf) {
+                    len = snprintf(buf, len + 1, format, transformBox); // <<<< COMPLETELY INCORRECT (string_t != char*)
+                    log_callback(buf, len);
+                    free(buf);
+                }
+            }
+        }
+
+        return false;
+    }*/
+
+    return true;
+}
+
+static void render_state_begin(const element_t* element, render_state_t* state, render_state_t* parent)
+{
+    stianloader_dbg_render_state_begin(element, state, parent, NULL);
 }
 
 static void render_state_end(render_state_t* state)
@@ -2032,7 +2082,7 @@ static bool apply_paint(render_state_t* state, render_context_t* context, const 
     return false;
 }
 
-static void draw_shape(const element_t* element, render_context_t* context, render_state_t* state)
+static bool stianloader_dbg_draw_shape(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     paint_t stroke = {paint_type_none};
     parse_paint(element, ATTR_STROKE, &stroke);
@@ -2051,7 +2101,7 @@ static void draw_shape(const element_t* element, render_context_t* context, rend
 
     if(state->mode == render_mode_bounding) {
         if(stroke.type == paint_type_none)
-            return;
+            return true;
         float line_width = resolve_length(state, &stroke_width, 'o');
         float cap_limit = line_width / 2.f;
         if(line_cap == PLUTOVG_LINE_CAP_SQUARE)
@@ -2066,7 +2116,7 @@ static void draw_shape(const element_t* element, render_context_t* context, rend
         state->extents.y -= delta;
         state->extents.w += delta * 2.f;
         state->extents.h += delta * 2.f;
-        return;
+        return true;
     }
 
     paint_t fill = {paint_type_color, {color_type_fixed, 0xFF000000}};
@@ -2111,6 +2161,13 @@ static void draw_shape(const element_t* element, render_context_t* context, rend
         plutovg_canvas_set_matrix(context->canvas, &state->matrix);
         plutovg_canvas_stroke_path(context->canvas, context->document->path);
     }
+
+    return true;
+}
+
+static void draw_shape(const element_t* element, render_context_t* context, render_state_t* state)
+{
+    stianloader_dbg_draw_shape(element, context, state, NULL);
 }
 
 static bool is_display_none(const element_t* element)
@@ -2127,7 +2184,9 @@ static bool is_visibility_hidden(const element_t* element)
     return visibility != visibility_visible;
 }
 
+static void stianloader_dbg_render_element(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback);
 static void render_element(const element_t* element, render_context_t* context, render_state_t* state);
+static void stianloader_dbg_render_children(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback);
 static void render_children(const element_t* element, render_context_t* context, render_state_t* state);
 
 static void apply_view_transform(render_state_t* state, float width, float height)
@@ -2186,7 +2245,7 @@ static void apply_view_transform(render_state_t* state, float width, float heigh
     state->view_height = view_box.h;
 }
 
-static void render_symbol(const element_t* element, render_context_t* context, render_state_t* state, float x, float y, float width, float height)
+static void stianloader_dbg_render_symbol(const element_t* element, render_context_t* context, render_state_t* state, float x, float y, float width, float height, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     if(width <= 0.f || height <= 0.f || is_display_none(element))
         return;
@@ -2198,14 +2257,18 @@ static void render_symbol(const element_t* element, render_context_t* context, r
     plutovg_matrix_translate(&new_state.matrix, x, y);
 
     apply_view_transform(&new_state, width, height);
-    render_children(element, context, &new_state);
+    stianloader_dbg_render_children(element, context, &new_state, log_callback);
     render_state_end(&new_state);
 }
 
-static void render_svg(const element_t* element, render_context_t* context, render_state_t* state)
+static void stianloader_dbg_render_svg(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     if(element->parent == NULL) {
-        render_symbol(element, context, state, 0.f, 0.f, context->document->width, context->document->height);
+        if (log_callback) {
+            log_callback("Rendering root symbol", strlen("Rendering root symbol"));
+        }
+
+        stianloader_dbg_render_symbol(element, context, state, 0.f, 0.f, context->document->width, context->document->height, log_callback);
         return;
     }
 
@@ -2224,7 +2287,12 @@ static void render_svg(const element_t* element, render_context_t* context, rend
     float _y = resolve_length(state, &y, 'y');
     float _w = resolve_length(state, &w, 'x');
     float _h = resolve_length(state, &h, 'y');
-    render_symbol(element, context, state, _x, _y, _w, _h);
+    stianloader_dbg_render_symbol(element, context, state, _x, _y, _w, _h, log_callback);
+}
+
+static void render_svg(const element_t* element, render_context_t* context, render_state_t* state)
+{
+    stianloader_dbg_render_svg(element, context, state, NULL);
 }
 
 static void render_use(const element_t* element, render_context_t* context, render_state_t* state)
@@ -2433,18 +2501,90 @@ static void render_poly(const element_t* element, render_context_t* context, ren
     render_state_end(&new_state);
 }
 
-static void render_path(const element_t* element, render_context_t* context, render_state_t* state)
+static bool stianloader_dbg_render_path(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     if(is_display_none(element) || is_visibility_hidden(element))
-        return;
+        return true;
+
+    if (log_callback) {
+        log_callback("Rendering visible path element", strlen("Rendering visible path element"));
+    }
+
+    bool render_success = true;
+
     render_state_t new_state;
     render_state_begin(element, &new_state, state);
 
     plutovg_path_reset(context->document->path);
-    parse_path(element, ATTR_D, context->document->path);
+
+    if (!stianloader_dbg_parse_path(element, ATTR_D, context->document->path, log_callback)) {
+        if (log_callback) {
+            log_callback("Couldn't parse path element", strlen("Couldn't parse path element"));
+        }
+
+        render_success = false;
+        goto cleanup;
+    }
+
+    if (log_callback) {
+        const char* format = "Post-parse path with extents %f x %f at offset %f / %f";
+        int len = snprintf(NULL, 0, format, new_state.extents.w, new_state.extents.h, new_state.extents.x, new_state.extents.y);
+
+        if (len > 0) {
+            char* buf = malloc(len + 1);
+
+            if (buf) {
+                len = snprintf(buf, len + 1, format, new_state.extents.w, new_state.extents.h, new_state.extents.x, new_state.extents.y);
+                log_callback(buf, len);
+                free(buf);
+            }
+        }
+    }
+
     plutovg_path_extents(context->document->path, &new_state.extents, false);
-    draw_shape(element, context, &new_state);
+
+    if (log_callback) {
+        const char* format = "Rendering path with extents %f x %f at offset %f / %f";
+        int len = snprintf(NULL, 0, format, new_state.extents.w, new_state.extents.h, new_state.extents.x, new_state.extents.y);
+
+        if (len > 0) {
+            char* buf = malloc(len + 1);
+
+            if (buf) {
+                len = snprintf(buf, len + 1, format, new_state.extents.w, new_state.extents.h, new_state.extents.x, new_state.extents.y);
+                log_callback(buf, len);
+                free(buf);
+            }
+        }
+    }
+
+    if (log_callback) {
+        const char* format = "Parent state extents %f x %f at offset %f / %f";
+        int len = snprintf(NULL, 0, format, state->extents.w, state->extents.h, state->extents.x, state->extents.y);
+
+        if (len > 0) {
+            char* buf = malloc(len + 1);
+
+            if (buf) {
+                len = snprintf(buf, len + 1, format, state->extents.w, state->extents.h, state->extents.x, state->extents.y);
+                log_callback(buf, len);
+                free(buf);
+            }
+        }
+    }
+
+    if (!stianloader_dbg_draw_shape(element, context, &new_state, log_callback)) {
+        if (log_callback) {
+            log_callback("Couldn't draw path shape", strlen("Couldn't draw path shape"));
+        }
+
+        render_success = false;
+        goto cleanup;
+    }
+
+cleanup:
     render_state_end(&new_state);
+    return render_success;
 }
 
 static void transform_view_rect(const view_position_t* position, plutovg_rect_t* dst_rect, plutovg_rect_t* src_rect)
@@ -2615,9 +2755,33 @@ static void render_image(const element_t* element, render_context_t* context, re
 
 static void render_element(const element_t* element, render_context_t* context, render_state_t* state)
 {
+    stianloader_dbg_render_element(element, context, state, NULL);
+}
+
+static void stianloader_dbg_render_element(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
+{
+    if (log_callback) {
+        const char* format = "Rendering element of type %d";
+        int len = snprintf(NULL, 0, format, element->id);
+
+        if (len > 0) {
+            char* buf = malloc(len + 1);
+
+            if (buf) {
+                len = snprintf(buf, len + 1, format, element->id);
+                log_callback(buf, len);
+                free(buf);
+            }
+        }
+    }
+
     switch(element->id) {
     case TAG_SVG:
-        render_svg(element, context, state);
+        if (log_callback) {
+            log_callback("Rendering TAG_SVG", strlen("Rendering TAG_SVG"));
+        }
+
+        stianloader_dbg_render_svg(element, context, state, log_callback);
         break;
     case TAG_USE:
         render_use(element, context, state);
@@ -2642,7 +2806,11 @@ static void render_element(const element_t* element, render_context_t* context, 
         render_poly(element, context, state);
         break;
     case TAG_PATH:
-        render_path(element, context, state);
+        if (log_callback) {
+            log_callback("Rendering TAG_PATH", strlen("Rendering TAG_PATH"));
+        }
+
+        stianloader_dbg_render_path(element, context, state, log_callback);
         break;
     case TAG_IMAGE:
         render_image(element, context, state);
@@ -2654,11 +2822,16 @@ static void render_element(const element_t* element, render_context_t* context, 
 
 static void render_children(const element_t* element, render_context_t* context, render_state_t* state)
 {
+    stianloader_dbg_render_children(element, context, state, NULL);
+}
+
+static void stianloader_dbg_render_children(const element_t* element, render_context_t* context, render_state_t* state, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
+{
     if(context->depth < MAX_RENDER_DEPTH) {
         const element_t* child = element->first_child;
         while(child) {
             context->depth++;
-            render_element(child, context, state);
+            stianloader_dbg_render_element(child, context, state, log_callback);
             context->depth--;
             child = child->next_sibling;
         }
@@ -2666,6 +2839,11 @@ static void render_children(const element_t* element, render_context_t* context,
 }
 
 bool plutosvg_document_render(const plutosvg_document_t* document, const char* id, plutovg_canvas_t* canvas, const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure)
+{
+    return stianloader_dbg_plutosvg_document_render(document, id, canvas, current_color, palette_func, closure, NULL);
+}
+
+bool stianloader_dbg_plutosvg_document_render(const plutosvg_document_t* document, const char* id, plutovg_canvas_t* canvas, const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     render_state_t state;
     state.parent = NULL;
@@ -2686,11 +2864,16 @@ bool plutosvg_document_render(const plutosvg_document_t* document, const char* i
     }
 
     render_context_t context = {document, canvas, current_color, palette_func, closure, 0};
-    render_element(state.element, &context, &state);
+    stianloader_dbg_render_element(state.element, &context, &state, log_callback);
     return true;
 }
 
 plutovg_surface_t* plutosvg_document_render_to_surface(const plutosvg_document_t* document, const char* id, int width, int height, const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure)
+{
+    return stianloader_dbg_plutosvg_document_render_to_surface(document, id, width, height, current_color, palette_func, closure, NULL);
+}
+
+plutovg_surface_t* stianloader_dbg_plutosvg_document_render_to_surface(const plutosvg_document_t* document, const char* id, int width, int height, const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure, stianloader_dbg_plutosvg_error_callback_func_t log_callback)
 {
     plutovg_rect_t extents = {0, 0, document->width, document->height};
     if(id && !plutosvg_document_extents(document, id, &extents))
@@ -2712,7 +2895,7 @@ plutovg_surface_t* plutosvg_document_render_to_surface(const plutosvg_document_t
     plutovg_canvas_t* canvas = plutovg_canvas_create(surface);
     plutovg_canvas_scale(canvas, width / extents.w, height / extents.h);
     plutovg_canvas_translate(canvas, -extents.x, -extents.y);
-    if(!plutosvg_document_render(document, id, canvas, current_color, palette_func, closure)) {
+    if(!stianloader_dbg_plutosvg_document_render(document, id, canvas, current_color, palette_func, closure, log_callback)) {
         plutovg_canvas_destroy(canvas);
         plutovg_surface_destroy(surface);
         return NULL;

@@ -164,6 +164,21 @@ PLUTOSVG_API bool plutosvg_document_render(const plutosvg_document_t* document, 
     const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure);
 
 /**
+ * @brief Renders an SVG document or a specific element onto a canvas.
+ *
+ * @param document Pointer to the SVG document.
+ * @param id ID of the SVG element to render, or `NULL` to render the entire document.
+ * @param canvas Canvas onto which the SVG element or document will be rendered.
+ * @param current_color Color used to resolve CSS `currentColor` values.
+ * @param palette_func Callback function for resolving CSS color variables.
+ * @param closure User-defined data passed to the `palette_func` callback.
+ * @param log_callback The callback function to use for log handling, or `NULL` if unused. May also be in use if rendering does not fail (useful for debugging purposes).
+ * @return `true` if rendering was successful; `false` otherwise.
+ */
+PLUTOSVG_API bool stianloader_dbg_plutosvg_document_render(const plutosvg_document_t* document, const char* id, plutovg_canvas_t* canvas,
+    const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure, stianloader_dbg_plutosvg_error_callback_func_t log_callback);
+
+/**
  * @brief Renders an SVG document or a specific element to a surface.
  *
  * @param document Pointer to the SVG document.
@@ -177,6 +192,22 @@ PLUTOSVG_API bool plutosvg_document_render(const plutosvg_document_t* document, 
  */
 PLUTOSVG_API plutovg_surface_t* plutosvg_document_render_to_surface(const plutosvg_document_t* document, const char* id, int width, int height,
     const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure);
+
+/**
+ * @brief Renders an SVG document or a specific element to a surface.
+ *
+ * @param document Pointer to the SVG document.
+ * @param id ID of the SVG element to render, or `NULL` to render the entire document.
+ * @param width Expected width of the surface, or `-1` if unspecified.
+ * @param height Expected height of the surface, or `-1` if unspecified.
+ * @param current_color Color used to resolve CSS `currentColor` values.
+ * @param palette_func Callback function for resolving CSS color variables.
+ * @param closure User-defined data passed to the `palette_func` callback.
+ * @param log_callback The callback function to use for log handling, or `NULL` if unused. May also be in use if rendering does not fail (useful for debugging purposes).
+ * @return Pointer to the rendered `plutovg_surface_t` object, or `NULL` if rendering fails.
+ */
+PLUTOSVG_API plutovg_surface_t* stianloader_dbg_plutosvg_document_render_to_surface(const plutosvg_document_t* document, const char* id, int width, int height,
+    const plutovg_color_t* current_color, plutosvg_palette_func_t palette_func, void* closure, stianloader_dbg_plutosvg_error_callback_func_t log_callback);
 
 /**
  * @brief Returns the intrinsic width of the SVG document.
